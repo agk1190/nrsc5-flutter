@@ -1,1 +1,0 @@
-/home/runner/work/nrsc5-flutter/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc  -O2 -fPIC -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/faad_cli.dir/link.d CMakeFiles/faad_cli.dir/frontend/audio.c.o CMakeFiles/faad_cli.dir/frontend/main.c.o CMakeFiles/faad_cli.dir/frontend/mp4read.c.o CMakeFiles/faad_cli.dir/frontend/unicode_support.c.o -o faad  libfaad.a -lm
