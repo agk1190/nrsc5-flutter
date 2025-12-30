@@ -1,0 +1,15 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The download step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+method=git
+command=/usr/local/bin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/home/runner/work/nrsc5-flutter/nrsc5-flutter/_codeql_build_dir/faad2-prefix/tmp/faad2_external-gitclone.cmake
+source_dir=/home/runner/work/nrsc5-flutter/nrsc5-flutter/_codeql_build_dir/faad2-prefix/src/faad2_external
+work_dir=/home/runner/work/nrsc5-flutter/nrsc5-flutter/_codeql_build_dir/faad2-prefix/src
+repository=https://github.com/knik0/faad2.git
+remote=origin
+init_submodules=TRUE
+recurse_submodules=--recursive
+submodules=
+CMP0097=NEW
+      

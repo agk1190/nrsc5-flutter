@@ -1,0 +1,8 @@
+/home/runner/work/nrsc5-flutter/nrsc5-flutter/_codeql_build_dir/faad2-prefix/lib/pkgconfig/faad2.pc
+/home/runner/work/nrsc5-flutter/nrsc5-flutter/_codeql_build_dir/faad2-prefix/lib/libfaad.a
+/home/runner/work/nrsc5-flutter/nrsc5-flutter/_codeql_build_dir/faad2-prefix/lib/libfaad_drm.a
+/home/runner/work/nrsc5-flutter/nrsc5-flutter/_codeql_build_dir/faad2-prefix/lib/libfaad_hdc.a
+/home/runner/work/nrsc5-flutter/nrsc5-flutter/_codeql_build_dir/faad2-prefix/bin/faad
+/home/runner/work/nrsc5-flutter/nrsc5-flutter/_codeql_build_dir/faad2-prefix/include/faad.h
+/home/runner/work/nrsc5-flutter/nrsc5-flutter/_codeql_build_dir/faad2-prefix/include/neaacdec.h
+/home/runner/work/nrsc5-flutter/nrsc5-flutter/_codeql_build_dir/faad2-prefix/share/man/man1/faad.1

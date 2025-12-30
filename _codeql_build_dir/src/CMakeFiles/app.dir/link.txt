@@ -1,0 +1,1 @@
+/home/runner/work/nrsc5-flutter/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/app.dir/link.d CMakeFiles/app.dir/main.c.o CMakeFiles/app.dir/log.c.o -o nrsc5  libnrsc5_static.a -lao -lpthread ../faad2-prefix/lib/libfaad_hdc.a -lfftw3f -lrtlsdr -lm -lpthread
