@@ -65,6 +65,7 @@ typedef struct {
     FILE *hdc_file;
     FILE *iq_file;
     char *aas_files_path;
+    FILE *flutter_pipe;
 
     audio_buffer_t *head, *tail, *free;
     pthread_mutex_t mutex;
@@ -306,6 +307,132 @@ static void change_program(state_t *st, unsigned int program)
     pthread_mutex_unlock(&st->mutex);
 }
 
+static void write_flutter_event(FILE *fp, const nrsc5_event_t *evt)
+{
+    if (!fp) return;
+    
+    char time_str[64];
+    nrsc5_id3_comment_t *comment;
+    const char *name;
+    
+    switch (evt->event)
+    {
+    case NRSC5_EVENT_SYNC:
+        fprintf(fp, "{\"event\":\"sync\",\"freq_offset\":%.0f,\"psmi\":%d}\n", evt->sync.freq_offset, evt->sync.psmi);
+        break;
+    case NRSC5_EVENT_LOST_SYNC:
+        fprintf(fp, "{\"event\":\"lost_sync\"}\n");
+        break;
+    case NRSC5_EVENT_MER:
+        fprintf(fp, "{\"event\":\"mer\",\"lower\":%.1f,\"upper\":%.1f}\n", evt->mer.lower, evt->mer.upper);
+        break;
+    case NRSC5_EVENT_BER:
+        fprintf(fp, "{\"event\":\"ber\",\"cber\":%.6f}\n", evt->ber.cber);
+        break;
+    case NRSC5_EVENT_ID3:
+        fprintf(fp, "{\"event\":\"id3\",\"program\":%u", evt->id3.program);
+        if (evt->id3.title)
+            fprintf(fp, ",\"title\":\"%s\"", evt->id3.title);
+        if (evt->id3.artist)
+            fprintf(fp, ",\"artist\":\"%s\"", evt->id3.artist);
+        if (evt->id3.album)
+            fprintf(fp, ",\"album\":\"%s\"", evt->id3.album);
+        if (evt->id3.genre)
+            fprintf(fp, ",\"genre\":\"%s\"", evt->id3.genre);
+        if (evt->id3.ufid.owner)
+            fprintf(fp, ",\"ufid_owner\":\"%s\",\"ufid_id\":\"%s\"", evt->id3.ufid.owner, evt->id3.ufid.id);
+        if (evt->id3.xhdr.param >= 0)
+            fprintf(fp, ",\"xhdr_param\":%d,\"xhdr_mime\":%u,\"xhdr_lot\":%d", evt->id3.xhdr.param, evt->id3.xhdr.mime, evt->id3.xhdr.lot);
+        if (evt->id3.comments) {
+            fprintf(fp, ",\"comments\":[");
+            for (comment = evt->id3.comments; comment != NULL; comment = comment->next) {
+                if (comment != evt->id3.comments) fprintf(fp, ",");
+                fprintf(fp, "{\"lang\":\"%s\",\"short_desc\":\"%s\",\"text\":\"%s\"}", 
+                        comment->lang ? comment->lang : "", 
+                        comment->short_content_desc ? comment->short_content_desc : "",
+                        comment->full_text ? comment->full_text : "");
+            }
+            fprintf(fp, "]");
+        }
+        fprintf(fp, "}\n");
+        break;
+    case NRSC5_EVENT_STATION_NAME:
+        fprintf(fp, "{\"event\":\"station_name\",\"name\":\"%s\"}\n", evt->station_name.name);
+        break;
+    case NRSC5_EVENT_STATION_SLOGAN:
+        fprintf(fp, "{\"event\":\"station_slogan\",\"slogan\":\"%s\"}\n", evt->station_slogan.slogan);
+        break;
+    case NRSC5_EVENT_STATION_MESSAGE:
+        fprintf(fp, "{\"event\":\"station_message\",\"message\":\"%s\"}\n", evt->station_message.message);
+        break;
+    case NRSC5_EVENT_STATION_LOCATION:
+        fprintf(fp, "{\"event\":\"station_location\",\"latitude\":%.4f,\"longitude\":%.4f,\"altitude\":%d}\n", 
+                evt->station_location.latitude, evt->station_location.longitude, evt->station_location.altitude);
+        break;
+    case NRSC5_EVENT_STATION_ID:
+        fprintf(fp, "{\"event\":\"station_id\",\"country\":\"%s\",\"fcc_facility_id\":%d}\n", 
+                evt->station_id.country_code, evt->station_id.fcc_facility_id);
+        break;
+    case NRSC5_EVENT_LOT:
+        strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->lot.expiry_utc);
+        fprintf(fp, "{\"event\":\"lot\",\"lot\":%u,\"name\":\"%s\",\"size\":%u,\"mime\":%u,\"expiry\":\"%s\"",
+                evt->lot.lot, evt->lot.name, evt->lot.size, evt->lot.mime, time_str);
+        if (evt->lot.data && evt->lot.size > 0) {
+            fprintf(fp, ",\"data\":\"");
+            for (unsigned int i = 0; i < evt->lot.size; i++) {
+                fprintf(fp, "%02x", evt->lot.data[i]);
+            }
+            fprintf(fp, "\"");
+        }
+        fprintf(fp, "}\n");
+        break;
+    case NRSC5_EVENT_HERE_IMAGE:
+        strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->here_image.time_utc);
+        fprintf(fp, "{\"event\":\"here_image\",\"type\":\"%s\",\"seq\":%d,\"n1\":%d,\"n2\":%d,\"time\":\"%s\",\"lat1\":%.5f,\"lon1\":%.5f,\"lat2\":%.5f,\"lon2\":%.5f,\"name\":\"%s\",\"size\":%u",
+                evt->here_image.image_type == NRSC5_HERE_IMAGE_TRAFFIC ? "TRAFFIC" : "WEATHER",
+                evt->here_image.seq, evt->here_image.n1, evt->here_image.n2, time_str,
+                evt->here_image.latitude1, evt->here_image.longitude1,
+                evt->here_image.latitude2, evt->here_image.longitude2,
+                evt->here_image.name, evt->here_image.size);
+        if (evt->here_image.data && evt->here_image.size > 0) {
+            fprintf(fp, ",\"data\":\"");
+            for (unsigned int i = 0; i < evt->here_image.size; i++) {
+                fprintf(fp, "%02x", evt->here_image.data[i]);
+            }
+            fprintf(fp, "\"");
+        }
+        fprintf(fp, "}\n");
+        break;
+    case NRSC5_EVENT_AUDIO_SERVICE_DESCRIPTOR:
+        nrsc5_program_type_name(evt->asd.type, &name);
+        fprintf(fp, "{\"event\":\"asd\",\"program\":%u,\"access\":\"%s\",\"type\":\"%s\",\"sound_exp\":%u}\n",
+                evt->asd.program,
+                evt->asd.access == NRSC5_ACCESS_PUBLIC ? "public" : "restricted",
+                name, evt->asd.sound_exp);
+        break;
+    case NRSC5_EVENT_EMERGENCY_ALERT:
+        if (evt->emergency_alert.message) {
+            fprintf(fp, "{\"event\":\"emergency_alert\",\"message\":\"%s\"", evt->emergency_alert.message);
+            if (evt->emergency_alert.category1 >= 1) {
+                nrsc5_alert_category_name(evt->emergency_alert.category1, &name);
+                fprintf(fp, ",\"category1\":\"%s\"", name);
+            }
+            if (evt->emergency_alert.category2 >= 1) {
+                nrsc5_alert_category_name(evt->emergency_alert.category2, &name);
+                fprintf(fp, ",\"category2\":\"%s\"", name);
+            }
+            fprintf(fp, "}\n");
+        } else {
+            fprintf(fp, "{\"event\":\"emergency_alert\",\"ended\":true}\n");
+        }
+        break;
+    default:
+        return;
+    }
+    
+    fflush(fp);
+}
+
 static void callback(const nrsc5_event_t *evt, void *opaque)
 {
     state_t *st = opaque;
@@ -314,6 +441,8 @@ static void callback(const nrsc5_event_t *evt, void *opaque)
     nrsc5_id3_comment_t *comment;
     const char *name;
     char time_str[64];
+
+    write_flutter_event(st->flutter_pipe, evt);
 
     switch (evt->event)
     {
@@ -645,7 +774,7 @@ static void *input_main(void *arg)
 
 static void help(const char *progname)
 {
-    fprintf(stderr, "Usage: %s [-v] [-q] [--am] [-l log-level] [-d device-index] [-H rtltcp-host] [-p ppm-error] [-g gain] [-r iq-input] [-w iq-output] [-o audio-output] [-t audio-type] [-T] [-D direct-sampling-mode] [--dump-hdc hdc-output] [--dump-aas-files directory] frequency program\n", progname);
+    fprintf(stderr, "Usage: %s [-v] [-q] [--am] [-l log-level] [-d device-index] [-H rtltcp-host] [-p ppm-error] [-g gain] [-r iq-input] [-w iq-output] [-o audio-output] [-t audio-type] [-T] [-D direct-sampling-mode] [--dump-hdc hdc-output] [--dump-aas-files directory] [--flutter-pipe pipe-path] frequency program\n", progname);
 }
 
 static int parse_args(state_t *st, int argc, char *argv[])
@@ -654,10 +783,11 @@ static int parse_args(state_t *st, int argc, char *argv[])
         { "dump-aas-files", required_argument, NULL, 1 },
         { "dump-hdc", required_argument, NULL, 2 },
         { "am", no_argument, NULL, 3 },
+        { "flutter-pipe", required_argument, NULL, 4 },
         { 0 }
     };
     const char *version = NULL;
-    char *output_name = NULL, *audio_name = NULL, *hdc_name = NULL;
+    char *output_name = NULL, *audio_name = NULL, *hdc_name = NULL, *flutter_pipe_name = NULL;
     char *audio_type = "wav";
     char *endptr;
     int opt;
@@ -681,6 +811,9 @@ static int parse_args(state_t *st, int argc, char *argv[])
             break;
         case 3:
             st->mode = NRSC5_MODE_AM;
+            break;
+        case 4:
+            flutter_pipe_name = optarg;
             break;
         case 'r':
             st->input_name = strdup(optarg);
@@ -802,6 +935,17 @@ static int parse_args(state_t *st, int argc, char *argv[])
         }
     }
 
+    if (flutter_pipe_name)
+    {
+        st->flutter_pipe = fopen(flutter_pipe_name, "w");
+        if (st->flutter_pipe == NULL)
+        {
+            log_fatal("Unable to open Flutter pipe.");
+            return 1;
+        }
+        setvbuf(st->flutter_pipe, NULL, _IOLBF, 0);
+    }
+
     return 0;
 }
 
@@ -828,6 +972,8 @@ static void cleanup(state_t *st)
         fclose(st->hdc_file);
     if (st->iq_file)
         fclose(st->iq_file);
+    if (st->flutter_pipe)
+        fclose(st->flutter_pipe);
 
     free(st->input_name);
     free(st->aas_files_path);
