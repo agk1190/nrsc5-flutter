@@ -307,6 +307,34 @@ static void change_program(state_t *st, unsigned int program)
     pthread_mutex_unlock(&st->mutex);
 }
 
+static void write_json_string(FILE *fp, const char *str)
+{
+    if (!str) {
+        fprintf(fp, "\"\"");
+        return;
+    }
+    
+    fputc('"', fp);
+    for (const char *p = str; *p; p++) {
+        switch (*p) {
+            case '"':  fprintf(fp, "\\\""); break;
+            case '\\': fprintf(fp, "\\\\"); break;
+            case '\b': fprintf(fp, "\\b"); break;
+            case '\f': fprintf(fp, "\\f"); break;
+            case '\n': fprintf(fp, "\\n"); break;
+            case '\r': fprintf(fp, "\\r"); break;
+            case '\t': fprintf(fp, "\\t"); break;
+            default:
+                if ((unsigned char)*p < 32) {
+                    fprintf(fp, "\\u%04x", (unsigned char)*p);
+                } else {
+                    fputc(*p, fp);
+                }
+        }
+    }
+    fputc('"', fp);
+}
+
 static void write_flutter_event(FILE *fp, const nrsc5_event_t *evt)
 {
     if (!fp) return;
@@ -331,52 +359,79 @@ static void write_flutter_event(FILE *fp, const nrsc5_event_t *evt)
         break;
     case NRSC5_EVENT_ID3:
         fprintf(fp, "{\"event\":\"id3\",\"program\":%u", evt->id3.program);
-        if (evt->id3.title)
-            fprintf(fp, ",\"title\":\"%s\"", evt->id3.title);
-        if (evt->id3.artist)
-            fprintf(fp, ",\"artist\":\"%s\"", evt->id3.artist);
-        if (evt->id3.album)
-            fprintf(fp, ",\"album\":\"%s\"", evt->id3.album);
-        if (evt->id3.genre)
-            fprintf(fp, ",\"genre\":\"%s\"", evt->id3.genre);
-        if (evt->id3.ufid.owner)
-            fprintf(fp, ",\"ufid_owner\":\"%s\",\"ufid_id\":\"%s\"", evt->id3.ufid.owner, evt->id3.ufid.id);
+        if (evt->id3.title) {
+            fprintf(fp, ",\"title\":");
+            write_json_string(fp, evt->id3.title);
+        }
+        if (evt->id3.artist) {
+            fprintf(fp, ",\"artist\":");
+            write_json_string(fp, evt->id3.artist);
+        }
+        if (evt->id3.album) {
+            fprintf(fp, ",\"album\":");
+            write_json_string(fp, evt->id3.album);
+        }
+        if (evt->id3.genre) {
+            fprintf(fp, ",\"genre\":");
+            write_json_string(fp, evt->id3.genre);
+        }
+        if (evt->id3.ufid.owner) {
+            fprintf(fp, ",\"ufid_owner\":");
+            write_json_string(fp, evt->id3.ufid.owner);
+            fprintf(fp, ",\"ufid_id\":");
+            write_json_string(fp, evt->id3.ufid.id);
+        }
         if (evt->id3.xhdr.param >= 0)
             fprintf(fp, ",\"xhdr_param\":%d,\"xhdr_mime\":%u,\"xhdr_lot\":%d", evt->id3.xhdr.param, evt->id3.xhdr.mime, evt->id3.xhdr.lot);
         if (evt->id3.comments) {
             fprintf(fp, ",\"comments\":[");
             for (comment = evt->id3.comments; comment != NULL; comment = comment->next) {
                 if (comment != evt->id3.comments) fprintf(fp, ",");
-                fprintf(fp, "{\"lang\":\"%s\",\"short_desc\":\"%s\",\"text\":\"%s\"}", 
-                        comment->lang ? comment->lang : "", 
-                        comment->short_content_desc ? comment->short_content_desc : "",
-                        comment->full_text ? comment->full_text : "");
+                fprintf(fp, "{\"lang\":");
+                write_json_string(fp, comment->lang);
+                fprintf(fp, ",\"short_desc\":");
+                write_json_string(fp, comment->short_content_desc);
+                fprintf(fp, ",\"text\":");
+                write_json_string(fp, comment->full_text);
+                fprintf(fp, "}");
             }
             fprintf(fp, "]");
         }
         fprintf(fp, "}\n");
         break;
     case NRSC5_EVENT_STATION_NAME:
-        fprintf(fp, "{\"event\":\"station_name\",\"name\":\"%s\"}\n", evt->station_name.name);
+        fprintf(fp, "{\"event\":\"station_name\",\"name\":");
+        write_json_string(fp, evt->station_name.name);
+        fprintf(fp, "}\n");
         break;
     case NRSC5_EVENT_STATION_SLOGAN:
-        fprintf(fp, "{\"event\":\"station_slogan\",\"slogan\":\"%s\"}\n", evt->station_slogan.slogan);
+        fprintf(fp, "{\"event\":\"station_slogan\",\"slogan\":");
+        write_json_string(fp, evt->station_slogan.slogan);
+        fprintf(fp, "}\n");
         break;
     case NRSC5_EVENT_STATION_MESSAGE:
-        fprintf(fp, "{\"event\":\"station_message\",\"message\":\"%s\"}\n", evt->station_message.message);
+        fprintf(fp, "{\"event\":\"station_message\",\"message\":");
+        write_json_string(fp, evt->station_message.message);
+        fprintf(fp, "}\n");
         break;
     case NRSC5_EVENT_STATION_LOCATION:
         fprintf(fp, "{\"event\":\"station_location\",\"latitude\":%.4f,\"longitude\":%.4f,\"altitude\":%d}\n", 
                 evt->station_location.latitude, evt->station_location.longitude, evt->station_location.altitude);
         break;
     case NRSC5_EVENT_STATION_ID:
-        fprintf(fp, "{\"event\":\"station_id\",\"country\":\"%s\",\"fcc_facility_id\":%d}\n", 
-                evt->station_id.country_code, evt->station_id.fcc_facility_id);
+        fprintf(fp, "{\"event\":\"station_id\",\"country\":");
+        write_json_string(fp, evt->station_id.country_code);
+        fprintf(fp, ",\"fcc_facility_id\":%d}\n", evt->station_id.fcc_facility_id);
         break;
     case NRSC5_EVENT_LOT:
-        strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->lot.expiry_utc);
-        fprintf(fp, "{\"event\":\"lot\",\"lot\":%u,\"name\":\"%s\",\"size\":%u,\"mime\":%u,\"expiry\":\"%s\"",
-                evt->lot.lot, evt->lot.name, evt->lot.size, evt->lot.mime, time_str);
+        if (evt->lot.expiry_utc)
+            strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->lot.expiry_utc);
+        else
+            strcpy(time_str, "unknown");
+        fprintf(fp, "{\"event\":\"lot\",\"lot\":%u,\"name\":", evt->lot.lot);
+        write_json_string(fp, evt->lot.name);
+        fprintf(fp, ",\"size\":%u,\"mime\":%u,\"expiry\":", evt->lot.size, evt->lot.mime);
+        write_json_string(fp, time_str);
         if (evt->lot.data && evt->lot.size > 0) {
             fprintf(fp, ",\"data\":\"");
             for (unsigned int i = 0; i < evt->lot.size; i++) {
@@ -387,13 +442,19 @@ static void write_flutter_event(FILE *fp, const nrsc5_event_t *evt)
         fprintf(fp, "}\n");
         break;
     case NRSC5_EVENT_HERE_IMAGE:
-        strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->here_image.time_utc);
-        fprintf(fp, "{\"event\":\"here_image\",\"type\":\"%s\",\"seq\":%d,\"n1\":%d,\"n2\":%d,\"time\":\"%s\",\"lat1\":%.5f,\"lon1\":%.5f,\"lat2\":%.5f,\"lon2\":%.5f,\"name\":\"%s\",\"size\":%u",
+        if (evt->here_image.time_utc)
+            strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->here_image.time_utc);
+        else
+            strcpy(time_str, "unknown");
+        fprintf(fp, "{\"event\":\"here_image\",\"type\":\"%s\",\"seq\":%d,\"n1\":%d,\"n2\":%d,\"time\":",
                 evt->here_image.image_type == NRSC5_HERE_IMAGE_TRAFFIC ? "TRAFFIC" : "WEATHER",
-                evt->here_image.seq, evt->here_image.n1, evt->here_image.n2, time_str,
+                evt->here_image.seq, evt->here_image.n1, evt->here_image.n2);
+        write_json_string(fp, time_str);
+        fprintf(fp, ",\"lat1\":%.5f,\"lon1\":%.5f,\"lat2\":%.5f,\"lon2\":%.5f,\"name\":",
                 evt->here_image.latitude1, evt->here_image.longitude1,
-                evt->here_image.latitude2, evt->here_image.longitude2,
-                evt->here_image.name, evt->here_image.size);
+                evt->here_image.latitude2, evt->here_image.longitude2);
+        write_json_string(fp, evt->here_image.name);
+        fprintf(fp, ",\"size\":%u", evt->here_image.size);
         if (evt->here_image.data && evt->here_image.size > 0) {
             fprintf(fp, ",\"data\":\"");
             for (unsigned int i = 0; i < evt->here_image.size; i++) {
@@ -405,21 +466,25 @@ static void write_flutter_event(FILE *fp, const nrsc5_event_t *evt)
         break;
     case NRSC5_EVENT_AUDIO_SERVICE_DESCRIPTOR:
         nrsc5_program_type_name(evt->asd.type, &name);
-        fprintf(fp, "{\"event\":\"asd\",\"program\":%u,\"access\":\"%s\",\"type\":\"%s\",\"sound_exp\":%u}\n",
+        fprintf(fp, "{\"event\":\"asd\",\"program\":%u,\"access\":\"%s\",\"type\":",
                 evt->asd.program,
-                evt->asd.access == NRSC5_ACCESS_PUBLIC ? "public" : "restricted",
-                name, evt->asd.sound_exp);
+                evt->asd.access == NRSC5_ACCESS_PUBLIC ? "public" : "restricted");
+        write_json_string(fp, name);
+        fprintf(fp, ",\"sound_exp\":%u}\n", evt->asd.sound_exp);
         break;
     case NRSC5_EVENT_EMERGENCY_ALERT:
         if (evt->emergency_alert.message) {
-            fprintf(fp, "{\"event\":\"emergency_alert\",\"message\":\"%s\"", evt->emergency_alert.message);
+            fprintf(fp, "{\"event\":\"emergency_alert\",\"message\":");
+            write_json_string(fp, evt->emergency_alert.message);
             if (evt->emergency_alert.category1 >= 1) {
                 nrsc5_alert_category_name(evt->emergency_alert.category1, &name);
-                fprintf(fp, ",\"category1\":\"%s\"", name);
+                fprintf(fp, ",\"category1\":");
+                write_json_string(fp, name);
             }
             if (evt->emergency_alert.category2 >= 1) {
                 nrsc5_alert_category_name(evt->emergency_alert.category2, &name);
-                fprintf(fp, ",\"category2\":\"%s\"", name);
+                fprintf(fp, ",\"category2\":");
+                write_json_string(fp, name);
             }
             fprintf(fp, "}\n");
         } else {
