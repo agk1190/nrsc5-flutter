@@ -266,7 +266,7 @@ rl.on('line', (line) => {
 - Events are line-buffered for real-time delivery
 - Audio and IQ data are NOT included in the event stream
 - The pipe will block if no reader is connected (use `cat > /dev/null` as a dummy reader if needed)
-- JSON strings are not escaped for special characters; ensure your JSON parser handles this
+- JSON strings are properly escaped including quotes, backslashes, newlines, tabs, and other control characters
 - For production use, consider error handling and reconnection logic
 - Named pipes (FIFOs) provide better real-time performance than regular files
 
