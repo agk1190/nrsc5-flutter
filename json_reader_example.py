@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-Example event reader for nrsc5 Flutter pipe output.
-This demonstrates how a Flutter app would read and parse the JSON events.
+Example event reader for nrsc5 JSON output.
+This demonstrates how an application would read and parse the JSON events.
 
 Usage:
     1. Create a named pipe: mkfifo /tmp/nrsc5_pipe
-    2. Run this script: python3 flutter_reader_example.py /tmp/nrsc5_pipe
-    3. In another terminal: nrsc5 --flutter-pipe /tmp/nrsc5_pipe [other options] frequency program
+    2. Run this script: python3 json_reader_example.py /tmp/nrsc5_pipe
+    3. In another terminal: nrsc5 --json-output /tmp/nrsc5_pipe [other options] frequency program
+    
+    Or with stdout mode:
+    nrsc5 --json-stdout [other options] frequency program | python3 json_reader_example.py /dev/stdin
 """
 
 import sys
@@ -14,7 +17,7 @@ import json
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python3 flutter_reader_example.py <pipe_path>")
+        print("Usage: python3 json_reader_example.py <pipe_path>")
         sys.exit(1)
     
     pipe_path = sys.argv[1]

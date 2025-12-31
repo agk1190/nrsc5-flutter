@@ -1,33 +1,43 @@
-# Flutter Event Piping
+# JSON Event Output
 
-This document describes the Flutter event piping feature added to nrsc5, which allows external applications (like Flutter apps) to receive real-time event data from the nrsc5 decoder.
+This document describes the JSON event output feature added to nrsc5, which allows external applications to receive real-time event data from the nrsc5 decoder.
 
 ## Overview
 
-The `--flutter-pipe` option enables nrsc5 to output event data in JSON format to a file or named pipe (FIFO). This allows Flutter or other applications to display metadata, station information, and images without processing audio.
+The `--json-output` option enables nrsc5 to output event data in JSON format to a file or named pipe (FIFO). The `--json-stdout` option outputs JSON events to stdout, suppressing normal log output. This allows applications to display metadata, station information, and images without processing audio.
 
 ## Usage
 
-### Basic Usage
+### Output to File or Named Pipe
 
 ```bash
 # Create a named pipe (FIFO)
 mkfifo /tmp/nrsc5_events
 
-# Start nrsc5 with Flutter pipe output
-nrsc5 --flutter-pipe /tmp/nrsc5_events 107.1 0
+# Start nrsc5 with JSON output to pipe
+nrsc5 --json-output /tmp/nrsc5_events 107.1 0
+```
+
+### Output to stdout
+
+```bash
+# Output JSON events to stdout (normal logs are suppressed)
+nrsc5 --json-stdout 107.1 0 > events.jsonl
 ```
 
 ### Reading Events
 
-In another terminal or process, read from the pipe:
+In another terminal or process, read from the pipe or file:
 
 ```bash
-# Simple reader
+# Simple reader from pipe
 cat /tmp/nrsc5_events
 
 # Or use the provided example
-python3 flutter_reader_example.py /tmp/nrsc5_events
+python3 json_reader_example.py /tmp/nrsc5_events
+
+# For stdout mode, pipe directly to the reader
+nrsc5 --json-stdout 107.1 0 | python3 json_reader_example.py /dev/stdin
 ```
 
 ### Using a Regular File
@@ -35,7 +45,7 @@ python3 flutter_reader_example.py /tmp/nrsc5_events
 Instead of a named pipe, you can also use a regular file:
 
 ```bash
-nrsc5 --flutter-pipe /tmp/nrsc5_events.jsonl 107.1 0
+nrsc5 --json-output /tmp/nrsc5_events.jsonl 107.1 0
 ```
 
 ## Event Format
@@ -181,8 +191,9 @@ When an alert ends:
 
 ```python
 import json
+import sys
 
-with open('/tmp/nrsc5_events', 'r') as pipe:
+with open(sys.argv[1], 'r') as pipe:
     for line in pipe:
         event = json.loads(line.strip())
         
@@ -198,7 +209,7 @@ with open('/tmp/nrsc5_events', 'r') as pipe:
                 f.write(data)
 ```
 
-### Flutter/Dart Example
+### Dart Example
 
 ```dart
 import 'dart:io';
@@ -265,7 +276,8 @@ rl.on('line', (line) => {
 
 - Events are line-buffered for real-time delivery
 - Audio and IQ data are NOT included in the event stream
-- The pipe will block if no reader is connected (use `cat > /dev/null` as a dummy reader if needed)
+- With `--json-output`, the pipe will block if no reader is connected (use `cat > /dev/null` as a dummy reader if needed)
+- With `--json-stdout`, normal log messages are suppressed and only JSON events are output to stdout
 - JSON strings are properly escaped including quotes, backslashes, newlines, tabs, and other control characters
 - For production use, consider error handling and reconnection logic
 - Named pipes (FIFOs) provide better real-time performance than regular files
@@ -283,20 +295,28 @@ xz -d sample.xz
 mkfifo /tmp/test_pipe
 
 # Start reader in background
-python3 ../flutter_reader_example.py /tmp/test_pipe &
+python3 ../json_reader_example.py /tmp/test_pipe &
 
 # Run nrsc5
 cd ..
-./build/src/nrsc5 --flutter-pipe /tmp/test_pipe -o /tmp/audio.wav -r support/sample 0
+./build/src/nrsc5 --json-output /tmp/test_pipe -o /tmp/audio.wav -r support/sample 0
+```
+
+Or test with stdout mode:
+
+```bash
+./build/src/nrsc5 --json-stdout -o /tmp/audio.wav -r support/sample 0 | head -20
 ```
 
 ## Implementation Details
 
-The Flutter piping feature is implemented with minimal changes to `main.c`:
-- Added `flutter_pipe` field to `state_t` structure
-- Added `write_flutter_event()` function to serialize events
-- Modified `callback()` to call `write_flutter_event()` for each event
-- Added `--flutter-pipe` command-line option
+The JSON output feature is implemented with minimal changes to `main.c`:
+- Added `json_output` field to `state_t` structure
+- Added `json_to_stdout` flag to suppress normal log output when using stdout mode
+- Added `write_json_string()` function to properly escape strings
+- Added `write_json_event()` function to serialize events
+- Modified `callback()` to call `write_json_event()` for each event and suppress log_info when json_to_stdout is enabled
+- Added `--json-output` and `--json-stdout` command-line options
 - Added cleanup code in `cleanup()` function
 
-All changes are contained within `main.c` and are conditionally enabled only when the `--flutter-pipe` option is used, making the implementation non-intrusive and easy to maintain during rebases.
+All changes are contained within `main.c` and are conditionally enabled only when one of the JSON output options is used, making the implementation non-intrusive and easy to maintain during rebases.

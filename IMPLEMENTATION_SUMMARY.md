@@ -7,12 +7,12 @@ Successfully implemented a feature to pipe nrsc5 event data to external Flutter 
 ## Changes Made
 
 ### Modified Files
-- `src/main.c` - Added Flutter event piping functionality (~210 lines)
+- `src/main.c` - Added JSON event output functionality (~210 lines)
 - `.gitignore` - Added support/sample to ignore decompressed test file
 
 ### New Files
-- `FLUTTER_PIPE.md` - Comprehensive documentation (302 lines)
-- `flutter_reader_example.py` - Reference implementation in Python (109 lines)
+- `JSON_OUTPUT.md` - Comprehensive documentation (302 lines)
+- `json_reader_example.py` - Reference implementation in Python (109 lines)
 
 ### Total Impact
 - **4 files changed**
@@ -22,7 +22,7 @@ Successfully implemented a feature to pipe nrsc5 event data to external Flutter 
 ## Implementation Details
 
 ### Command-Line Option
-Added `--flutter-pipe <path>` option that takes a file path for output.
+Added `--json-output <path>` option that takes a file path for output.
 
 ### JSON Event Format
 Events are serialized as JSON objects, one per line (JSONL format):
@@ -73,14 +73,14 @@ Events are serialized as JSON objects, one per line (JSONL format):
 
 ## Documentation
 
-### User Documentation (FLUTTER_PIPE.md)
+### User Documentation (JSON_OUTPUT.md)
 - Complete event format reference
 - Usage instructions
 - Integration examples (Python, Dart, Node.js)
 - Testing guide
 - Notes on performance and security
 
-### Example Code (flutter_reader_example.py)
+### Example Code (json_reader_example.py)
 - Demonstrates event parsing
 - Shows best practices
 - Ready to use or adapt
@@ -115,7 +115,7 @@ Events are serialized as JSON objects, one per line (JSONL format):
 ## Advantages
 
 1. **Minimal Changes**: Only ~210 lines in main.c
-2. **Non-Intrusive**: Only active when --flutter-pipe specified
+2. **Non-Intrusive**: Only active when --json-output specified
 3. **No Dependencies**: Uses standard C library only
 4. **Easy to Rebase**: Localized changes, no structural modifications
 5. **Secure**: Proper escaping and NULL checks
@@ -146,11 +146,11 @@ All changes in main.c are in isolated functions:
 To add new event types:
 1. Add case to `write_flutter_event()` switch
 2. Serialize event data to JSON
-3. Update FLUTTER_PIPE.md documentation
+3. Update JSON_OUTPUT.md documentation
 4. No changes to core nrsc5 needed
 
 ### Debugging
-Enable with: `--flutter-pipe /dev/stdout` to see events in console.
+Enable with: `--json-output /dev/stdout` to see events in console.
 
 ## Conclusion
 

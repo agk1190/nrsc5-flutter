@@ -65,7 +65,8 @@ typedef struct {
     FILE *hdc_file;
     FILE *iq_file;
     char *aas_files_path;
-    FILE *flutter_pipe;
+    FILE *json_output;
+    int json_to_stdout;
 
     audio_buffer_t *head, *tail, *free;
     pthread_mutex_t mutex;
@@ -335,7 +336,7 @@ static void write_json_string(FILE *fp, const char *str)
     fputc('"', fp);
 }
 
-static void write_flutter_event(FILE *fp, const nrsc5_event_t *evt)
+static void write_json_event(FILE *fp, const nrsc5_event_t *evt)
 {
     if (!fp) return;
     
@@ -507,7 +508,7 @@ static void callback(const nrsc5_event_t *evt, void *opaque)
     const char *name;
     char time_str[64];
 
-    write_flutter_event(st->flutter_pipe, evt);
+    write_json_event(st->json_output, evt);
 
     switch (evt->event)
     {
@@ -515,16 +516,19 @@ static void callback(const nrsc5_event_t *evt, void *opaque)
         done_signal(st);
         break;
     case NRSC5_EVENT_AGC:
-        if (evt->agc.is_final)
-            log_info("Best gain: %.1f dB, Peak amplitude: %.1f dBFS", evt->agc.gain_db, evt->agc.peak_dbfs);
-        else
-            log_debug("Gain: %.1f dB, Peak amplitude: %.1f dBFS", evt->agc.gain_db, evt->agc.peak_dbfs);
+        if (!st->json_to_stdout) {
+            if (evt->agc.is_final)
+                log_info("Best gain: %.1f dB, Peak amplitude: %.1f dBFS", evt->agc.gain_db, evt->agc.peak_dbfs);
+            else
+                log_debug("Gain: %.1f dB, Peak amplitude: %.1f dBFS", evt->agc.gain_db, evt->agc.peak_dbfs);
+        }
         break;
     case NRSC5_EVENT_BER:
         dump_ber(evt->ber.cber);
         break;
     case NRSC5_EVENT_MER:
-        log_info("MER: %.1f dB (lower), %.1f dB (upper)", evt->mer.lower, evt->mer.upper);
+        if (!st->json_to_stdout)
+            log_info("MER: %.1f dB (lower), %.1f dB (upper)", evt->mer.lower, evt->mer.upper);
         break;
     case NRSC5_EVENT_IQ:
         if (st->iq_file)
@@ -539,7 +543,8 @@ static void callback(const nrsc5_event_t *evt, void *opaque)
             st->audio_packets++;
             st->audio_bytes += evt->hdc.count * sizeof(evt->hdc.data[0]);
             if (st->audio_packets >= 32) {
-                log_info("Audio bit rate: %.1f kbps", (float)st->audio_bytes * 8 * NRSC5_SAMPLE_RATE_AUDIO / NRSC5_AUDIO_FRAME_SAMPLES / st->audio_packets / 1000);
+                if (!st->json_to_stdout)
+                    log_info("Audio bit rate: %.1f kbps", (float)st->audio_bytes * 8 * NRSC5_SAMPLE_RATE_AUDIO / NRSC5_AUDIO_FRAME_SAMPLES / st->audio_packets / 1000);
                 st->audio_packets = 0;
                 st->audio_bytes = 0;
             }
@@ -549,52 +554,59 @@ static void callback(const nrsc5_event_t *evt, void *opaque)
         push_audio_buffer(st, evt->audio.program, evt->audio.data, evt->audio.count);
         break;
     case NRSC5_EVENT_SYNC:
-        log_info("Synchronized");
-        log_info("Frequency offset: %.0f Hz", evt->sync.freq_offset);
-        log_info("Primary service mode: %d", evt->sync.psmi);
+        if (!st->json_to_stdout) {
+            log_info("Synchronized");
+            log_info("Frequency offset: %.0f Hz", evt->sync.freq_offset);
+            log_info("Primary service mode: %d", evt->sync.psmi);
+        }
         st->audio_ready = 0;
         break;
     case NRSC5_EVENT_LOST_SYNC:
-        log_info("Lost synchronization");
+        if (!st->json_to_stdout)
+            log_info("Lost synchronization");
         break;
     case NRSC5_EVENT_ID3:
         if (evt->id3.program == st->program)
         {
-            if (evt->id3.title)
-                log_info("Title: %s", evt->id3.title);
-            if (evt->id3.artist)
-                log_info("Artist: %s", evt->id3.artist);
-            if (evt->id3.album)
-                log_info("Album: %s", evt->id3.album);
-            if (evt->id3.genre)
-                log_info("Genre: %s", evt->id3.genre);
-            for (comment = evt->id3.comments; comment != NULL; comment = comment->next)
-                log_info("Comment: lang=%s %s %s", comment->lang, comment->short_content_desc, comment->full_text);
-            if (evt->id3.ufid.owner)
-                log_info("Unique file identifier: %s %s", evt->id3.ufid.owner, evt->id3.ufid.id);
-            if (evt->id3.xhdr.param >= 0)
-                log_info("XHDR: %d %08X %d", evt->id3.xhdr.param, evt->id3.xhdr.mime, evt->id3.xhdr.lot);
+            if (!st->json_to_stdout) {
+                if (evt->id3.title)
+                    log_info("Title: %s", evt->id3.title);
+                if (evt->id3.artist)
+                    log_info("Artist: %s", evt->id3.artist);
+                if (evt->id3.album)
+                    log_info("Album: %s", evt->id3.album);
+                if (evt->id3.genre)
+                    log_info("Genre: %s", evt->id3.genre);
+                for (comment = evt->id3.comments; comment != NULL; comment = comment->next)
+                    log_info("Comment: lang=%s %s %s", comment->lang, comment->short_content_desc, comment->full_text);
+                if (evt->id3.ufid.owner)
+                    log_info("Unique file identifier: %s %s", evt->id3.ufid.owner, evt->id3.ufid.id);
+                if (evt->id3.xhdr.param >= 0)
+                    log_info("XHDR: %d %08X %d", evt->id3.xhdr.param, evt->id3.xhdr.mime, evt->id3.xhdr.lot);
+            }
         }
         break;
     case NRSC5_EVENT_SIG:
-        for (sig_service = evt->sig.services; sig_service != NULL; sig_service = sig_service->next)
-        {
-            log_info("SIG Service: type=%s number=%d name=%s",
-                     sig_service->type == NRSC5_SIG_SERVICE_AUDIO ? "audio" : "data",
-                     sig_service->number, sig_service->name);
-
-            for (sig_component = sig_service->components; sig_component != NULL; sig_component = sig_component->next)
+        if (!st->json_to_stdout) {
+            for (sig_service = evt->sig.services; sig_service != NULL; sig_service = sig_service->next)
             {
-                if (sig_component->type == NRSC5_SIG_SERVICE_AUDIO)
+                log_info("SIG Service: type=%s number=%d name=%s",
+                         sig_service->type == NRSC5_SIG_SERVICE_AUDIO ? "audio" : "data",
+                         sig_service->number, sig_service->name);
+
+                for (sig_component = sig_service->components; sig_component != NULL; sig_component = sig_component->next)
                 {
-                    log_info("  Audio component: id=%d port=%04X type=%d mime=%08X", sig_component->id,
-                             sig_component->audio.port, sig_component->audio.type, sig_component->audio.mime);
-                }
-                else if (sig_component->type == NRSC5_SIG_SERVICE_DATA)
-                {
-                    log_info("  Data component: id=%d port=%04X service_data_type=%d type=%d mime=%08X",
-                             sig_component->id, sig_component->data.port, sig_component->data.service_data_type,
-                             sig_component->data.type, sig_component->data.mime);
+                    if (sig_component->type == NRSC5_SIG_SERVICE_AUDIO)
+                    {
+                        log_info("  Audio component: id=%d port=%04X type=%d mime=%08X", sig_component->id,
+                                 sig_component->audio.port, sig_component->audio.type, sig_component->audio.mime);
+                    }
+                    else if (sig_component->type == NRSC5_SIG_SERVICE_DATA)
+                    {
+                        log_info("  Data component: id=%d port=%04X service_data_type=%d type=%d mime=%08X",
+                                 sig_component->id, sig_component->data.port, sig_component->data.service_data_type,
+                                 sig_component->data.type, sig_component->data.mime);
+                    }
                 }
             }
         }
@@ -608,8 +620,10 @@ static void callback(const nrsc5_event_t *evt, void *opaque)
     case NRSC5_EVENT_LOT:
         if (st->aas_files_path)
             dump_aas_file(st, evt);
-        strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->lot.expiry_utc);
-        log_info("LOT file: port=%04X lot=%d name=%s size=%d mime=%08X expiry=%s", evt->lot.component->data.port, evt->lot.lot, evt->lot.name, evt->lot.size, evt->lot.mime, time_str);
+        if (!st->json_to_stdout) {
+            strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->lot.expiry_utc);
+            log_info("LOT file: port=%04X lot=%d name=%s size=%d mime=%08X expiry=%s", evt->lot.component->data.port, evt->lot.lot, evt->lot.name, evt->lot.size, evt->lot.mime, time_str);
+        }
         break;
     case NRSC5_EVENT_LOT_HEADER:
         strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->lot.expiry_utc);
@@ -623,109 +637,124 @@ static void callback(const nrsc5_event_t *evt, void *opaque)
                       evt->lot_fragment.repeat, evt->lot_fragment.size, evt->lot_fragment.bytes_so_far);
         break;
     case NRSC5_EVENT_STATION_ID:
-        log_info("Country: %s, FCC facility ID: %d", evt->station_id.country_code, evt->station_id.fcc_facility_id);
+        if (!st->json_to_stdout)
+            log_info("Country: %s, FCC facility ID: %d", evt->station_id.country_code, evt->station_id.fcc_facility_id);
         break;
     case NRSC5_EVENT_STATION_NAME:
-        log_info("Station name: %s", evt->station_name.name);
+        if (!st->json_to_stdout)
+            log_info("Station name: %s", evt->station_name.name);
         break;
     case NRSC5_EVENT_STATION_SLOGAN:
-        log_info("Slogan: %s", evt->station_slogan.slogan);
+        if (!st->json_to_stdout)
+            log_info("Slogan: %s", evt->station_slogan.slogan);
         break;
     case NRSC5_EVENT_STATION_MESSAGE:
-        log_info("Message: %s", evt->station_message.message);
+        if (!st->json_to_stdout)
+            log_info("Message: %s", evt->station_message.message);
         break;
     case NRSC5_EVENT_STATION_LOCATION:
-        log_info("Station location: %.4f, %.4f, %dm", evt->station_location.latitude, evt->station_location.longitude, evt->station_location.altitude);
+        if (!st->json_to_stdout)
+            log_info("Station location: %.4f, %.4f, %dm", evt->station_location.latitude, evt->station_location.longitude, evt->station_location.altitude);
         break;
     case NRSC5_EVENT_AUDIO_SERVICE_DESCRIPTOR:
-        nrsc5_program_type_name(evt->asd.type, &name);
-        log_info("Audio program %d: %s, type: %s, sound experience %d",
-                    evt->asd.program,
-                    evt->asd.access == NRSC5_ACCESS_PUBLIC ? "public" : "restricted",
-                    name, evt->asd.sound_exp);
+        if (!st->json_to_stdout) {
+            nrsc5_program_type_name(evt->asd.type, &name);
+            log_info("Audio program %d: %s, type: %s, sound experience %d",
+                        evt->asd.program,
+                        evt->asd.access == NRSC5_ACCESS_PUBLIC ? "public" : "restricted",
+                        name, evt->asd.sound_exp);
+        }
         break;
     case NRSC5_EVENT_DATA_SERVICE_DESCRIPTOR:
-        nrsc5_service_data_type_name(evt->dsd.type, &name);
-        log_info("Data service: %s, type: %s, MIME type %03x",
-                    evt->dsd.access == NRSC5_ACCESS_PUBLIC ? "public" : "restricted",
-                    name, evt->dsd.mime_type);
+        if (!st->json_to_stdout) {
+            nrsc5_service_data_type_name(evt->dsd.type, &name);
+            log_info("Data service: %s, type: %s, MIME type %03x",
+                        evt->dsd.access == NRSC5_ACCESS_PUBLIC ? "public" : "restricted",
+                        name, evt->dsd.mime_type);
+        }
         break;
     case NRSC5_EVENT_EMERGENCY_ALERT:
-        if (evt->emergency_alert.message)
-        {
-            int i;
-            char alert_details[512] = "";
-            const char *name = NULL;
+        if (!st->json_to_stdout) {
+            if (evt->emergency_alert.message)
+            {
+                int i;
+                char alert_details[512] = "";
+                const char *name = NULL;
 
-            strcat(alert_details, "Category=[");
-            if (evt->emergency_alert.category1 >= 1)
-            {
-                nrsc5_alert_category_name(evt->emergency_alert.category1, &name);
-                strcat(alert_details, name);
-            }
-            if (evt->emergency_alert.category2 >= 1)
-            {
-                nrsc5_alert_category_name(evt->emergency_alert.category2, &name);
-                strcat(alert_details, ", ");
-                strcat(alert_details, name);
-            }
-            strcat(alert_details, "] ");
-
-            switch (evt->emergency_alert.location_format)
-            {
-            case NRSC5_LOCATION_FORMAT_SAME:
-                strcat(alert_details, "SAME=");
-                break;
-            case NRSC5_LOCATION_FORMAT_FIPS:
-                strcat(alert_details, "FIPS=");
-                break;
-            case NRSC5_LOCATION_FORMAT_ZIP:
-                strcat(alert_details, "ZIP=");
-                break;
-            }
-
-            strcat(alert_details, "[");
-            for (i = 0; i < evt->emergency_alert.num_locations; i++)
-            {
-                if (i > 0)
+                strcat(alert_details, "Category=[");
+                if (evt->emergency_alert.category1 >= 1)
+                {
+                    nrsc5_alert_category_name(evt->emergency_alert.category1, &name);
+                    strcat(alert_details, name);
+                }
+                if (evt->emergency_alert.category2 >= 1)
+                {
+                    nrsc5_alert_category_name(evt->emergency_alert.category2, &name);
                     strcat(alert_details, ", ");
-                sprintf(alert_details + strlen(alert_details), "%d", evt->emergency_alert.locations[i]);
-            }
-            strcat(alert_details, "]");
+                    strcat(alert_details, name);
+                }
+                strcat(alert_details, "] ");
 
-            log_info("Alert: %s %s", alert_details, evt->emergency_alert.message);
+                switch (evt->emergency_alert.location_format)
+                {
+                case NRSC5_LOCATION_FORMAT_SAME:
+                    strcat(alert_details, "SAME=");
+                    break;
+                case NRSC5_LOCATION_FORMAT_FIPS:
+                    strcat(alert_details, "FIPS=");
+                    break;
+                case NRSC5_LOCATION_FORMAT_ZIP:
+                    strcat(alert_details, "ZIP=");
+                    break;
+                }
+
+                strcat(alert_details, "[");
+                for (i = 0; i < evt->emergency_alert.num_locations; i++)
+                {
+                    if (i > 0)
+                        strcat(alert_details, ", ");
+                    sprintf(alert_details + strlen(alert_details), "%d", evt->emergency_alert.locations[i]);
+                }
+                strcat(alert_details, "]");
+
+                log_info("Alert: %s %s", alert_details, evt->emergency_alert.message);
+            }
+            else
+                log_info("Alert ended");
         }
-        else
-            log_info("Alert ended");
         break;
     case NRSC5_EVENT_AUDIO_SERVICE:
-        nrsc5_program_type_name(evt->audio_service.type, &name);
-        log_info("Audio service %d: %s, type: %s, codec: %d, blend: %d, gain: %d dB, delay: %d, latency: %d",
-                evt->audio_service.program,
-                evt->audio_service.access == NRSC5_ACCESS_PUBLIC ? "public" : "restricted",
-                name,
-                evt->audio_service.codec_mode,
-                evt->audio_service.blend_control,
-                evt->audio_service.digital_audio_gain,
-                evt->audio_service.common_delay,
-                evt->audio_service.latency);
+        if (!st->json_to_stdout) {
+            nrsc5_program_type_name(evt->audio_service.type, &name);
+            log_info("Audio service %d: %s, type: %s, codec: %d, blend: %d, gain: %d dB, delay: %d, latency: %d",
+                    evt->audio_service.program,
+                    evt->audio_service.access == NRSC5_ACCESS_PUBLIC ? "public" : "restricted",
+                    name,
+                    evt->audio_service.codec_mode,
+                    evt->audio_service.blend_control,
+                    evt->audio_service.digital_audio_gain,
+                    evt->audio_service.common_delay,
+                    evt->audio_service.latency);
+        }
         break;
     case NRSC5_EVENT_HERE_IMAGE:
         if (st->aas_files_path)
             dump_aas_file(st, evt);
-        strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->here_image.time_utc);
-        log_info("HERE Image: type=%s, seq=%d, n1=%d, n2=%d, time=%s, lat1=%.5f, lon1=%.5f, lat2=%.5f, lon2=%.5f, name=%s, size=%d",
-                 evt->here_image.image_type == NRSC5_HERE_IMAGE_TRAFFIC ? "TRAFFIC" : "WEATHER",
-                 evt->here_image.seq,
-                 evt->here_image.n1,
-                 evt->here_image.n2,
-                 time_str,
-                 evt->here_image.latitude1,
-                 evt->here_image.longitude1,
-                 evt->here_image.latitude2,
-                 evt->here_image.longitude2,
-                 evt->here_image.name,
-                 evt->here_image.size);
+        if (!st->json_to_stdout) {
+            strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->here_image.time_utc);
+            log_info("HERE Image: type=%s, seq=%d, n1=%d, n2=%d, time=%s, lat1=%.5f, lon1=%.5f, lat2=%.5f, lon2=%.5f, name=%s, size=%d",
+                     evt->here_image.image_type == NRSC5_HERE_IMAGE_TRAFFIC ? "TRAFFIC" : "WEATHER",
+                     evt->here_image.seq,
+                     evt->here_image.n1,
+                     evt->here_image.n2,
+                     time_str,
+                     evt->here_image.latitude1,
+                     evt->here_image.longitude1,
+                     evt->here_image.latitude2,
+                     evt->here_image.longitude2,
+                     evt->here_image.name,
+                     evt->here_image.size);
+        }
         break;
     }
 }
@@ -839,7 +868,7 @@ static void *input_main(void *arg)
 
 static void help(const char *progname)
 {
-    fprintf(stderr, "Usage: %s [-v] [-q] [--am] [-l log-level] [-d device-index] [-H rtltcp-host] [-p ppm-error] [-g gain] [-r iq-input] [-w iq-output] [-o audio-output] [-t audio-type] [-T] [-D direct-sampling-mode] [--dump-hdc hdc-output] [--dump-aas-files directory] [--flutter-pipe pipe-path] frequency program\n", progname);
+    fprintf(stderr, "Usage: %s [-v] [-q] [--am] [-l log-level] [-d device-index] [-H rtltcp-host] [-p ppm-error] [-g gain] [-r iq-input] [-w iq-output] [-o audio-output] [-t audio-type] [-T] [-D direct-sampling-mode] [--dump-hdc hdc-output] [--dump-aas-files directory] [--json-output file-path] [--json-stdout] frequency program\n", progname);
 }
 
 static int parse_args(state_t *st, int argc, char *argv[])
@@ -848,11 +877,12 @@ static int parse_args(state_t *st, int argc, char *argv[])
         { "dump-aas-files", required_argument, NULL, 1 },
         { "dump-hdc", required_argument, NULL, 2 },
         { "am", no_argument, NULL, 3 },
-        { "flutter-pipe", required_argument, NULL, 4 },
+        { "json-output", required_argument, NULL, 4 },
+        { "json-stdout", no_argument, NULL, 5 },
         { 0 }
     };
     const char *version = NULL;
-    char *output_name = NULL, *audio_name = NULL, *hdc_name = NULL, *flutter_pipe_name = NULL;
+    char *output_name = NULL, *audio_name = NULL, *hdc_name = NULL, *json_output_name = NULL;
     char *audio_type = "wav";
     char *endptr;
     int opt;
@@ -878,7 +908,10 @@ static int parse_args(state_t *st, int argc, char *argv[])
             st->mode = NRSC5_MODE_AM;
             break;
         case 4:
-            flutter_pipe_name = optarg;
+            json_output_name = optarg;
+            break;
+        case 5:
+            st->json_to_stdout = 1;
             break;
         case 'r':
             st->input_name = strdup(optarg);
@@ -1000,15 +1033,20 @@ static int parse_args(state_t *st, int argc, char *argv[])
         }
     }
 
-    if (flutter_pipe_name)
+    if (json_output_name)
     {
-        st->flutter_pipe = fopen(flutter_pipe_name, "w");
-        if (st->flutter_pipe == NULL)
+        st->json_output = fopen(json_output_name, "w");
+        if (st->json_output == NULL)
         {
-            log_fatal("Unable to open Flutter pipe.");
+            log_fatal("Unable to open JSON output file.");
             return 1;
         }
-        setvbuf(st->flutter_pipe, NULL, _IOLBF, 0);
+        setvbuf(st->json_output, NULL, _IOLBF, 0);
+    }
+    else if (st->json_to_stdout)
+    {
+        st->json_output = stdout;
+        setvbuf(st->json_output, NULL, _IOLBF, 0);
     }
 
     return 0;
@@ -1037,8 +1075,8 @@ static void cleanup(state_t *st)
         fclose(st->hdc_file);
     if (st->iq_file)
         fclose(st->iq_file);
-    if (st->flutter_pipe)
-        fclose(st->flutter_pipe);
+    if (st->json_output && st->json_output != stdout)
+        fclose(st->json_output);
 
     free(st->input_name);
     free(st->aas_files_path);
