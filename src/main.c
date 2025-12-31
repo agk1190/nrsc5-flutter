@@ -813,24 +813,26 @@ static void restore_termios(void *arg)
 static void *input_main(void *arg)
 {
     state_t *st = arg;
-
-    if (!isatty(STDIN_FILENO))
-        return NULL;
+    int is_tty = isatty(STDIN_FILENO);
 
 #ifdef __MINGW32__
-    HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
-    DWORD mode = 0;
-    GetConsoleMode(hStdin, &mode);
-    SetConsoleMode(hStdin, mode & (~ENABLE_ECHO_INPUT) & (~ENABLE_LINE_INPUT));
+    if (is_tty) {
+        HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+        DWORD mode = 0;
+        GetConsoleMode(hStdin, &mode);
+        SetConsoleMode(hStdin, mode & (~ENABLE_ECHO_INPUT) & (~ENABLE_LINE_INPUT));
+    }
 #else
     struct termios prev_termios, t;
 
-    // disable terminal canonical mode
-    tcgetattr(STDIN_FILENO, &prev_termios);
-    pthread_cleanup_push(restore_termios, &prev_termios);
-    t = prev_termios;
-    t.c_lflag &= ~ICANON;
-    tcsetattr(STDIN_FILENO, TCSANOW, &t);
+    if (is_tty) {
+        // disable terminal canonical mode
+        tcgetattr(STDIN_FILENO, &prev_termios);
+        pthread_cleanup_push(restore_termios, &prev_termios);
+        t = prev_termios;
+        t.c_lflag &= ~ICANON;
+        tcsetattr(STDIN_FILENO, TCSANOW, &t);
+    }
 #endif
 
     while (!st->done)
@@ -860,8 +862,9 @@ static void *input_main(void *arg)
     }
 
 #ifndef __MINGW32__
-    // restore terminal settings
-    pthread_cleanup_pop(1);
+    // restore terminal settings if we modified them
+    if (is_tty)
+        pthread_cleanup_pop(1);
 #endif
 
     return NULL;
