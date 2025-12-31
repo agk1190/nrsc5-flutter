@@ -524,7 +524,8 @@ static void callback(const nrsc5_event_t *evt, void *opaque)
         }
         break;
     case NRSC5_EVENT_BER:
-        dump_ber(evt->ber.cber);
+        if (!st->json_to_stdout)
+            dump_ber(evt->ber.cber);
         break;
     case NRSC5_EVENT_MER:
         if (!st->json_to_stdout)
