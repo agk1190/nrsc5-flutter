@@ -401,8 +401,7 @@ static void write_json_event(FILE *fp, const nrsc5_event_t *evt)
         fprintf(fp, "}\n");
         break;
     case NRSC5_EVENT_HDC:
-        float bit_rate = (float)evt->hdc.count * 8 * NRSC5_SAMPLE_RATE_AUDIO / NRSC5_AUDIO_FRAME_SAMPLES / 1000;
-        fprintf(fp, "{\"event\":\"hdc\",\"program\":%u,\"bit_rate_kbps\":%.1f}\n", evt->hdc.program, bit_rate);
+        fprintf(fp, "{\"event\":\"hdc\",\"program\":%u,\"bit_rate_kbps\":%.1f}\n", evt->hdc.program, (float)evt->hdc.count * 8 * NRSC5_SAMPLE_RATE_AUDIO / NRSC5_AUDIO_FRAME_SAMPLES / 1000);
         break;
     case NRSC5_EVENT_STATION_NAME:
         fprintf(fp, "{\"event\":\"station_name\",\"name\":");
