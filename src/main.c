@@ -400,6 +400,10 @@ static void write_json_event(FILE *fp, const nrsc5_event_t *evt)
         }
         fprintf(fp, "}\n");
         break;
+    case NRSC5_EVENT_HDC:
+        float bit_rate = (float)evt->hdc.count * 8 * NRSC5_SAMPLE_RATE_AUDIO / NRSC5_AUDIO_FRAME_SAMPLES / 1000;
+        fprintf(fp, "{\"event\":\"hdc\",\"program\":%u,\"bit_rate_kbps\":%.1f}\n", evt->hdc.program, bit_rate);
+        break;
     case NRSC5_EVENT_STATION_NAME:
         fprintf(fp, "{\"event\":\"station_name\",\"name\":");
         write_json_string(fp, evt->station_name.name);
@@ -473,6 +477,60 @@ static void write_json_event(FILE *fp, const nrsc5_event_t *evt)
         write_json_string(fp, name);
         fprintf(fp, ",\"sound_exp\":%u}\n", evt->asd.sound_exp);
         break;
+    case NRSC5_EVENT_DATA_SERVICE_DESCRIPTOR:
+        nrsc5_service_data_type_name(evt->dsd.type, &name);
+        fprintf(fp, "{\"event\":\"dsd\",\"access\":\"%s\",\"type\":",
+                evt->dsd.access == NRSC5_ACCESS_PUBLIC ? "public" : "restricted");
+        write_json_string(fp, name);
+        fprintf(fp, ",\"mime_type\":%u}\n", evt->dsd.mime_type);
+        break;
+    case NRSC5_EVENT_AUDIO_SERVICE:
+        nrsc5_program_type_name(evt->audio_service.type, &name);
+        fprintf(fp, "{\"event\":\"audio_service\",\"program\":%u,\"access\":\"%s\",\"type\":",
+                evt->audio_service.program,
+                evt->audio_service.access == NRSC5_ACCESS_PUBLIC ? "public" : "restricted");
+        write_json_string(fp, name);
+        fprintf(fp, ",\"codec\":%d,\"blend\":%d,\"gain\":%d,\"delay\":%d,\"latency\":%d}\n",
+                evt->audio_service.codec_mode,
+                evt->audio_service.blend_control,
+                evt->audio_service.digital_audio_gain,
+                evt->audio_service.common_delay,
+                evt->audio_service.latency);
+        break;
+    case NRSC5_EVENT_SIG: {
+        nrsc5_sig_service_t *sig_service;
+        nrsc5_sig_component_t *sig_component;
+        int first_service = 1, first_component;
+        fprintf(fp, "{\"event\":\"sig\",\"services\":[");
+        for (sig_service = evt->sig.services; sig_service != NULL; sig_service = sig_service->next) {
+            if (!first_service) fprintf(fp, ",");
+            first_service = 0;
+            fprintf(fp, "{\"type\":\"%s\",\"number\":%d,\"name\":",
+                    sig_service->type == NRSC5_SIG_SERVICE_AUDIO ? "audio" : "data",
+                    sig_service->number);
+            write_json_string(fp, sig_service->name);
+            fprintf(fp, ",\"components\":[");
+            first_component = 1;
+            for (sig_component = sig_service->components; sig_component != NULL; sig_component = sig_component->next) {
+                if (!first_component) fprintf(fp, ",");
+                first_component = 0;
+                fprintf(fp, "{\"id\":%d,\"port\":%04X", sig_component->id, sig_component->audio.port);
+                if (sig_component->type == NRSC5_SIG_SERVICE_AUDIO) {
+                    fprintf(fp, ",\"audio_type\":%d,\"mime\":%08X", sig_component->audio.type, sig_component->audio.mime);
+                } else if (sig_component->type == NRSC5_SIG_SERVICE_DATA) {
+                    fprintf(fp, ",\"service_data_type\":%d,\"data_type\":%d,\"mime\":%08X",
+                            sig_component->data.service_data_type,
+                            sig_component->data.type,
+                            sig_component->data.mime);
+                }
+                fprintf(fp, "}");
+            }
+            fprintf(fp, "]");
+            fprintf(fp, "}");
+        }
+        fprintf(fp, "]}\n");
+        break;
+    }
     case NRSC5_EVENT_EMERGENCY_ALERT:
         if (evt->emergency_alert.message) {
             fprintf(fp, "{\"event\":\"emergency_alert\",\"message\":");
