@@ -336,13 +336,15 @@ static void write_json_string(FILE *fp, const char *str)
     fputc('"', fp);
 }
 
-static void write_json_event(FILE *fp, const nrsc5_event_t *evt)
+static void write_json_event(FILE *fp, const nrsc5_event_t *evt, void *opaque)
 {
     if (!fp) return;
     
+    state_t *st = opaque;
     char time_str[64];
     nrsc5_id3_comment_t *comment;
     const char *name;
+    static unsigned int hdc_packets = 0, hdc_bytes = 0;
     
     switch (evt->event)
     {
@@ -400,9 +402,20 @@ static void write_json_event(FILE *fp, const nrsc5_event_t *evt)
         }
         fprintf(fp, "}\n");
         break;
-    case NRSC5_EVENT_HDC:
-        fprintf(fp, "{\"event\":\"hdc\",\"program\":%u,\"bit_rate_kbps\":%.1f}\n", evt->hdc.program, (float)evt->hdc.count * 8 * NRSC5_SAMPLE_RATE_AUDIO / NRSC5_AUDIO_FRAME_SAMPLES / 1000);
+    case NRSC5_EVENT_HDC: {
+        if (evt->hdc.program == st->program)
+        {
+            hdc_packets++;
+            hdc_bytes += evt->hdc.count;
+            if (hdc_packets >= 32) {
+                float bit_rate = (float)hdc_bytes * 8 * NRSC5_SAMPLE_RATE_AUDIO / NRSC5_AUDIO_FRAME_SAMPLES / hdc_packets / 1000;
+                fprintf(fp, "{\"event\":\"hdc\",\"program\":%u,\"bit_rate_kbps\":%.1f}\n", evt->hdc.program, bit_rate);
+                hdc_packets = 0;
+                hdc_bytes = 0;
+            }
+        }
         break;
+    }
     case NRSC5_EVENT_STATION_NAME:
         fprintf(fp, "{\"event\":\"station_name\",\"name\":");
         write_json_string(fp, evt->station_name.name);
@@ -432,7 +445,7 @@ static void write_json_event(FILE *fp, const nrsc5_event_t *evt)
             strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", evt->lot.expiry_utc);
         else
             strcpy(time_str, "unknown");
-        fprintf(fp, "{\"event\":\"lot\",\"lot\":%u,\"name\":", evt->lot.lot);
+        fprintf(fp, "{\"event\":\"lot\",\"port\":%u,\"lot\":%u,\"name\":", evt->lot.component->data.port, evt->lot.lot);
         write_json_string(fp, evt->lot.name);
         fprintf(fp, ",\"size\":%u,\"mime\":%u,\"expiry\":", evt->lot.size, evt->lot.mime);
         write_json_string(fp, time_str);
@@ -513,11 +526,12 @@ static void write_json_event(FILE *fp, const nrsc5_event_t *evt)
             for (sig_component = sig_service->components; sig_component != NULL; sig_component = sig_component->next) {
                 if (!first_component) fprintf(fp, ",");
                 first_component = 0;
-                fprintf(fp, "{\"id\":%d,\"port\":%04X", sig_component->id, sig_component->audio.port);
+                fprintf(fp, "{\"id\":%d,\"type\":%d", sig_component->id, sig_component->type);
                 if (sig_component->type == NRSC5_SIG_SERVICE_AUDIO) {
-                    fprintf(fp, ",\"audio_type\":%d,\"mime\":%08X", sig_component->audio.type, sig_component->audio.mime);
+                    fprintf(fp, ",\"port\":%u,\"audio_type\":%d,\"mime\":%u", sig_component->audio.port, sig_component->audio.type, sig_component->audio.mime);
                 } else if (sig_component->type == NRSC5_SIG_SERVICE_DATA) {
-                    fprintf(fp, ",\"service_data_type\":%d,\"data_type\":%d,\"mime\":%08X",
+                    fprintf(fp, ", \"port\":%u,\"service_data_type\":%d,\"data_type\":%d,\"mime\":%u",
+                            sig_component->data.port,
                             sig_component->data.service_data_type,
                             sig_component->data.type,
                             sig_component->data.mime);
@@ -565,7 +579,7 @@ static void callback(const nrsc5_event_t *evt, void *opaque)
     const char *name;
     char time_str[64];
 
-    write_json_event(st->json_output, evt);
+    write_json_event(st->json_output, evt, opaque);
 
     switch (evt->event)
     {
