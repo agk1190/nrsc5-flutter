@@ -128,6 +128,8 @@ Replace `64` with `32` if you want a 32-bit build. Once the build is complete, c
     --dump-aas-files dir-name            dump AAS files
                                            (WARNING: insecure)
     --dump-hdc file-name                 dump HDC packets
+    --json-stdout                   replace human-friendly output with json in the terminal
+    --json-output file-name/pipe    send json output to file or pipe
 
 ### Examples:
 
