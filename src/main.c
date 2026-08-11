@@ -645,24 +645,26 @@ static void callback(const nrsc5_event_t *evt, void *opaque)
             log_info("Synchronized");
             log_info("Frequency offset: %.0f Hz", evt->sync.freq_offset);
             log_info("Primary service mode: %d", evt->sync.psmi);
-            if (evt->sync.pli != -1) {
-                char am_flags[128] = "";
-                strcat(am_flags, "Digital bandwidth: ");
-                strcat(am_flags, evt->sync.rdbi ? "reduced" : "full");
-                if (!evt->sync.rdbi)
+        }
+        if (evt->sync.pli != -1)
+        {
+            char am_flags[128] = "";
+            strcat(am_flags, "Digital bandwidth: ");
+            strcat(am_flags, evt->sync.rdbi ? "reduced" : "full");
+            if (!evt->sync.rdbi)
+            {
+                if (evt->sync.psmi != 2)
                 {
-                    if (evt->sync.psmi != 2)
-                    {
-                        strcat(am_flags, ", analog bandwidth: ");
-                        strcat(am_flags, evt->sync.aabi ? "8 kHz" : "5 kHz");
-                        strcat(am_flags, ", secondary/tertiary power: ");
-                        strcat(am_flags, evt->sync.pli ? "high" : "low");
-                    }
-                    strcat(am_flags, ", PIDS power: ");
-                    strcat(am_flags, evt->sync.hppi ? "high" : "low");
+                    strcat(am_flags, ", analog bandwidth: ");
+                    strcat(am_flags, evt->sync.aabi ? "8 kHz" : "5 kHz");
+                    strcat(am_flags, ", secondary/tertiary power: ");
+                    strcat(am_flags, evt->sync.pli ? "high" : "low");
                 }
-                log_info(am_flags);
+                strcat(am_flags, ", PIDS power: ");
+                strcat(am_flags, evt->sync.hppi ? "high" : "low");
             }
+            if (!st->json_to_stdout)
+                log_info(am_flags);
         }
         break;
     case NRSC5_EVENT_LOST_SYNC:
@@ -1001,15 +1003,15 @@ static void on_key_press(state_t *st, char ch)
 static void *input_main(void *arg)
 {
     state_t *st = arg;
-    int is_tty = isatty(STDIN_FILENO);
+
+    if (!isatty(STDIN_FILENO))
+        return NULL;
 
 #ifdef __MINGW32__
-    if (is_tty) {
-        HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
-        DWORD mode = 0;
-        GetConsoleMode(hStdin, &mode);
-        SetConsoleMode(hStdin, mode & (~ENABLE_ECHO_INPUT) & (~ENABLE_LINE_INPUT));
-    }
+    HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0;
+    GetConsoleMode(hStdin, &mode);
+    SetConsoleMode(hStdin, mode & (~ENABLE_ECHO_INPUT) & (~ENABLE_LINE_INPUT));
 #else
     struct termios prev_termios, t;
 
