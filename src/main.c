@@ -1004,40 +1004,58 @@ static void *input_main(void *arg)
 {
     state_t *st = arg;
 
-    if (!isatty(STDIN_FILENO))
-        return NULL;
-
 #ifdef __MINGW32__
     HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
     DWORD mode = 0;
-    GetConsoleMode(hStdin, &mode);
-    SetConsoleMode(hStdin, mode & (~ENABLE_ECHO_INPUT) & (~ENABLE_LINE_INPUT));
-#else
-    struct termios prev_termios, t;
+    const BOOL is_console = GetConsoleMode(hStdin, &mode);
 
-    // disable terminal canonical mode
-    tcgetattr(STDIN_FILENO, &prev_termios);
-    t = prev_termios;
-    t.c_lflag &= ~ICANON;
-    tcsetattr(STDIN_FILENO, TCSANOW, &t);
+    if (is_console)
+        SetConsoleMode(hStdin, mode & (~ENABLE_ECHO_INPUT) & (~ENABLE_LINE_INPUT));
+#else
+    const int stdin_is_tty = isatty(STDIN_FILENO);
+    struct termios prev_termios, t;
 
     struct pollfd pfd;
     pfd.fd = STDIN_FILENO;
     pfd.events = POLLIN;
+
+    if (stdin_is_tty)
+    {
+        // disable terminal canonical mode
+        tcgetattr(STDIN_FILENO, &prev_termios);
+        t = prev_termios;
+        t.c_lflag &= ~ICANON;
+        tcsetattr(STDIN_FILENO, TCSANOW, &t);
+    }
 #endif
 
     while (!is_done(st))
     {
 #ifdef __MINGW32__
         INPUT_RECORD r;
-        DWORD read;
+    DWORD read_count;
+
+        if (!is_console)
+        {
+            char ch;
+            if (!ReadFile(hStdin, &ch, 1, &read_count, NULL))
+            {
+                log_error("Stdin read failed: ReadFile error %d", GetLastError());
+                break;
+            }
+            if (read_count == 0)
+                done_signal(st);
+            else
+                on_key_press(st, ch);
+            continue;
+        }
 
         switch (WaitForSingleObject(hStdin, STDIN_POLL_RATE_MS))
         {
         case WAIT_TIMEOUT:
             continue;
         case WAIT_OBJECT_0:
-            if (!ReadConsoleInput(hStdin, &r, 1, &read))
+            if (!ReadConsoleInput(hStdin, &r, 1, &read_count))
             {
                 log_error("Stdin read failed: ReadConsoleInput error %d", GetLastError());
                 break;
@@ -1082,7 +1100,8 @@ static void *input_main(void *arg)
 
 #ifndef __MINGW32__
     // restore terminal settings
-    tcsetattr(STDIN_FILENO, TCSANOW, &prev_termios);
+    if (stdin_is_tty)
+        tcsetattr(STDIN_FILENO, TCSANOW, &prev_termios);
 #endif
 
     return NULL;
